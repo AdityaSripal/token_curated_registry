@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"fmt"
 	"github.com/tendermint/go-amino"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	bank "github.com/cosmos/cosmos-sdk/x/bank"
@@ -192,10 +191,6 @@ func NewApplyHandler(accountKeeper bank.Keeper, ballotMapper db.BallotMapper, li
 			}
 		} else {
 			if ctx.BlockHeader().Height < ballot.EndApplyBlockStamp {
-				fmt.Println("hello")
-				fmt.Println(ctx.BlockHeader().Height)
-				fmt.Println(ballot.EndApplyBlockStamp)
-				fmt.Println("bye")
 				return sdk.NewError(2, 120, "Cannot apply until application phase ends").Result()
 			} else {
 				listing := types.Listing{

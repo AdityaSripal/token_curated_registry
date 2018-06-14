@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"testing"
 	"os"
 	"github.com/stretchr/testify/require"
@@ -193,8 +192,6 @@ func TestApplyUnchallengedFlow(t *testing.T) {
 	dres := rapp.Deliver(tx)
 	assert.Equal(t, sdk.CodeType(0), sdk.CodeType(dres.Code), dres.Log)
 	
-	fmt.Println(rapp.LastBlockHeight())
-
 	rapp.EndBlock(abci.RequestEndBlock{})
 	rapp.Commit()
 
@@ -208,10 +205,6 @@ func TestApplyUnchallengedFlow(t *testing.T) {
 		rapp.Commit()
 	}
 
-	fmt.Println("Start")
-	fmt.Println(rapp.LastBlockHeight())
-	fmt.Println("End")
-
 	applyMsg := types.NewApplyMsg(addr, "Unique registry listing")
 
 	sig = privKey.Sign(applyMsg.GetSignBytes())
@@ -222,12 +215,22 @@ func TestApplyUnchallengedFlow(t *testing.T) {
 		0,
 	}})
 
-	//applyTxBytes, _ := cdc.MarshalBinary(applyTx)
-
-	rapp.BeginBlock(abci.RequestBeginBlock{})
+	rapp.BeginBlock(abci.RequestBeginBlock{Header: header})
 	applyRes := rapp.Deliver(applyTx)
 
 	assert.Equal(t, sdk.CodeType(0), sdk.CodeType(applyRes.Code), applyRes.Log)
 
+	ctx := rapp.NewContext(false, header)
+
+	store := ctx.KVStore(rapp.capKeyListings)
+
+	listing := types.Listing{
+		Identifier: "Unique registry listing",
+		Votes: 0,
+	}
+	expected, _ := rapp.cdc.MarshalBinary(listing)
+	actual := store.Get([]byte("Unique registry listing"))
+
+	assert.Equal(t, expected, actual, "Listing not added correctly to registry")
 
 }
