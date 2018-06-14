@@ -314,7 +314,7 @@ func TestRevealHandler(t *testing.T) {
 	assert.Equal(t, sdk.ABCICodeType(0x20080), res.Code, "Handler did not fail as expected when voting twice")
 }
 
-func TestApplyPassChallenge(t *testing.T) {
+func TestApplyHandler(t *testing.T) {
 	// setup
 	addr := utils.GenerateAddress()
 	challenger := utils.GenerateAddress()

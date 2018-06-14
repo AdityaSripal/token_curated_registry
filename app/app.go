@@ -14,7 +14,8 @@ import (
 	dbl "github.com/AdityaSripal/token_curated_registry/db"
 	"github.com/AdityaSripal/token_curated_registry/types"
 	"github.com/tendermint/go-crypto"
-	//rlp "github.com/ethereum/go-ethereum/rlp"
+	"encoding/json"
+	"github.com/cosmos/cosmos-sdk/wire"
 )
 
 const (
@@ -139,4 +140,26 @@ func MakeCodec() *amino.Codec {
 	cdc.RegisterInterface((*auth.Account)(nil), nil)
 	cdc.RegisterConcrete(&auth.BaseAccount{}, "cosmos-sdk/BaseAccount", nil)
 	return cdc
+}
+
+// Custom logic for state export
+func (app *RegistryApp) ExportAppStateJSON() (appState json.RawMessage, err error) {
+	ctx := app.NewContext(true, abci.Header{})
+
+	// iterate to get the accounts
+	accounts := []*types.GenesisAccount{}
+	appendAccount := func(acc auth.Account) (stop bool) {
+		account := &types.GenesisAccount{
+			Address: acc.GetAddress(),
+			Coins:   acc.GetCoins(),
+		}
+		accounts = append(accounts, account)
+		return false
+	}
+	app.accountMapper.IterateAccounts(ctx, appendAccount)
+
+	genState := types.GenesisState{
+		Accounts: accounts,
+	}
+	return wire.MarshalJSONIndent(app.cdc, genState)
 }

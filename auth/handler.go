@@ -190,7 +190,7 @@ func NewApplyHandler(accountKeeper bank.Keeper, ballotMapper db.BallotMapper, li
 				return sdk.NewError(2, 120, "Cannot apply until reveal phase ends").Result()
 			}
 		} else {
-			if ctx.BlockHeader().Height < ballot.EndApplyBlockStamp {
+			if ctx.BlockHeight() < ballot.EndApplyBlockStamp {
 				return sdk.NewError(2, 120, "Cannot apply until application phase ends").Result()
 			} else {
 				listing := types.Listing{
