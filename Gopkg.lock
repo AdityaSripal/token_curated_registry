@@ -8,6 +8,12 @@
   revision = "86fed781132ac890ee03e906e4ecd5d6fa180c64"
 
 [[projects]]
+  branch = "master"
+  name = "github.com/btcsuite/btcutil"
+  packages = ["bech32"]
+  revision = "d4cc87b860166d00d6b5b9e0d3b3d71d6088d4d4"
+
+[[projects]]
   name = "github.com/cosmos/cosmos-sdk"
   packages = [
     "baseapp",
@@ -17,8 +23,8 @@
     "x/auth",
     "x/bank"
   ]
-  revision = "cf46be225b7f3853e36af0feac04e29188cd4c95"
-  version = "v0.17.5"
+  revision = "96451b55fff107511a65bf930b81fb12bed133a1"
+  version = "v0.18.0"
 
 [[projects]]
   name = "github.com/davecgh/go-spew"
@@ -76,8 +82,8 @@
     "ptypes/duration",
     "ptypes/timestamp"
   ]
-  revision = "925541529c1fa6821df4e44ce2723319eb2be768"
-  version = "v1.0.0"
+  revision = "b4deda0973fb4c70b50d226b1af49f3da59f5265"
+  version = "v1.1.0"
 
 [[projects]]
   branch = "master"
@@ -139,6 +145,12 @@
   version = "v0.8.0"
 
 [[projects]]
+  name = "github.com/pmezard/go-difflib"
+  packages = ["difflib"]
+  revision = "792786c7400a136282c1664665ae0a8db921c6c2"
+  version = "v1.0.0"
+
+[[projects]]
   name = "github.com/spf13/afero"
   packages = [
     ".",
@@ -172,6 +184,12 @@
   version = "v1.0.2"
 
 [[projects]]
+  name = "github.com/stretchr/testify"
+  packages = ["assert"]
+  revision = "f35b8ab0b5a2cef36673838d662e249dd9c94686"
+  version = "v1.2.2"
+
+[[projects]]
   branch = "master"
   name = "github.com/syndtr/goleveldb"
   packages = [
@@ -196,8 +214,8 @@
     "server",
     "types"
   ]
-  revision = "78a8905690ef54f9d57e3b2b0ee7ad3a04ef3f1f"
-  version = "v0.10.3"
+  revision = "ebee2fe114020aa49c70bbbae50b7079fc7e7b90"
+  version = "v0.11.0"
 
 [[projects]]
   branch = "master"
@@ -222,27 +240,36 @@
   version = "v0.6.2"
 
 [[projects]]
-  name = "github.com/tendermint/go-wire"
-  packages = ["."]
-  revision = "3c22a7a539411f89a96738fcfa14c1027e24e5ec"
-  version = "0.9.10"
-
-[[projects]]
   name = "github.com/tendermint/iavl"
-  packages = ["."]
-  revision = "fd37a0fa3a7454423233bc3d5ea828f38e0af787"
-  version = "v0.7.0"
+  packages = [
+    ".",
+    "sha256truncated"
+  ]
+  revision = "c9206995e8f948e99927f5084a88a7e94ca256da"
+  version = "v0.8.0-rc0"
 
 [[projects]]
+  name = "github.com/tendermint/tendermint"
+  packages = [
+    "libs/pubsub",
+    "libs/pubsub/query",
+    "types"
+  ]
+  revision = "27bd1deabe4ba6a2d9b463b8f3e3f1e31b993e61"
+  version = "v0.20.0"
+
+[[projects]]
+  branch = "develop"
   name = "github.com/tendermint/tmlibs"
   packages = [
+    "bech32",
     "common",
     "db",
     "log",
-    "merkle"
+    "merkle",
+    "merkle/tmhash"
   ]
-  revision = "692f1d86a6e2c0efa698fd1e4541b68c74ffaf38"
-  version = "v0.8.4"
+  revision = "0c98d10b4ffbd87978d79c160e835b3d3df241ec"
 
 [[projects]]
   branch = "master"
@@ -337,6 +364,6 @@
 [solve-meta]
   analyzer-name = "dep"
   analyzer-version = 1
-  inputs-digest = "7ed4da36a98d9e9901d17266f1a5607d7bf81aebc82421da43a3ec6a478a04b9"
+  inputs-digest = "926ff142f61ba6f28ebcab30ac66a5db82aa0c7c13f6b0514dd18fde795e2924"
   solver-name = "gps-cdcl"
   solver-version = 1

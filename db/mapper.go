@@ -1,176 +1,161 @@
 package db
 
 import (
+	"github.com/cosmos/cosmos-sdk/x/bank"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	"github.com/tendermint/go-amino"
 	"github.com/AdityaSripal/token_curated_registry/types"
-	crypto "github.com/tendermint/go-crypto"
-	"reflect"
 )
 
-type RegistryMapper struct {
+type BallotMapper struct {
 	ListingKey sdk.StoreKey
 
 	CommitKey sdk.StoreKey
 
 	RevealKey sdk.StoreKey
 
-	VoteKey sdk.StoreKey
+	BallotKey sdk.StoreKey
 
 	Cdc *amino.Codec
 }
 
-func NewRegistryMapper(listingkey sdk.StoreKey, commitKey sdk.StoreKey, revealKey sdk.StoreKey, voteKey sdk.StoreKey, _cdc *amino.Codec) RegistryMapper {
-	return RegistryMapper{
-		ListingKey: listingkey,
+func NewBallotMapper(listingKey sdk.StoreKey, ballotkey sdk.StoreKey, commitKey sdk.StoreKey, revealKey sdk.StoreKey, _cdc *amino.Codec) BallotMapper {
+	return BallotMapper{
+		ListingKey: listingKey,
 		CommitKey: commitKey,
 		RevealKey: revealKey,
-		VoteKey: voteKey,
+		BallotKey: ballotkey,
 		Cdc: _cdc,
 	}
 }
 
-// Will get Listing using unique identifier. Do not need to specify status
-func (rm RegistryMapper) GetListing(ctx sdk.Context, identifier string) types.Listing {
-	store := ctx.KVStore(rm.ListingKey)
-	key, _ := rm.Cdc.MarshalBinary(identifier)
+// Will get Ballot using unique identifier. Do not need to specify status
+func (bm BallotMapper) GetBallot(ctx sdk.Context, identifier string) types.Ballot {
+	store := ctx.KVStore(bm.BallotKey)
+	key := []byte(identifier)
 	val := store.Get(key)
 	if val == nil {
-		return types.Listing{}
+		return types.Ballot{}
 	}
-	listing := &types.Listing{}
-	err := rm.Cdc.UnmarshalBinary(val, listing)
+	ballot := &types.Ballot{}
+	err := bm.Cdc.UnmarshalBinary(val, ballot)
 	if err != nil {
 		panic(err)
 	}
-	return *listing
+	return *ballot
 }
 
-func (rm RegistryMapper) AddListing(ctx sdk.Context, identifier string, minBond int64) sdk.Error {
-	store := ctx.KVStore(rm.ListingKey)
+func (bm BallotMapper) AddBallot(ctx sdk.Context, identifier string, owner sdk.Address, applyLen int64, bond int64) sdk.Error {
+	store := ctx.KVStore(bm.BallotKey)
 
-	// Cannot add an already existing listing
-	if (!reflect.DeepEqual(rm.GetListing(ctx, identifier), types.Listing{})) {
-		return sdk.NewError(2, 102, "Listing already exists")
-	}
-
-	newListing := types.Listing{
+	newBallot := types.Ballot{
 		Identifier: identifier,
-		Status: "Pending",
-		Display: false,
-		Bond: minBond,
+		Owner: owner,
+		Bond: bond,
+		EndApplyBlockStamp: ctx.BlockHeight() + applyLen,
 	}
-	// Add listing with Pending Status
-	key, _ := rm.Cdc.MarshalBinary(identifier)
-	val, _ := rm.Cdc.MarshalBinary(newListing)
+	// Add ballot with Pending Status
+	key := []byte(identifier)
+	val, _ := bm.Cdc.MarshalBinary(newBallot)
 	store.Set(key, val)
 	return nil
 }
 
-func (rm RegistryMapper) ChallengeListing(ctx sdk.Context, owner sdk.Address, challenger sdk.Address, identifier string, minBond int64) sdk.Error {
-	store := ctx.KVStore(rm.ListingKey)
-	voteStore := ctx.KVStore(rm.VoteKey)
-	listing := rm.GetListing(ctx, identifier)
+func (bm BallotMapper) ActivateBallot(ctx sdk.Context, accountKeeper bank.Keeper, owner sdk.Address, challenger sdk.Address, identifier string, commitLen int64, revealLen, minBond int64, challengeBond int64) sdk.Error {
+	store := ctx.KVStore(bm.BallotKey)
+	ballot := bm.GetBallot(ctx, identifier)
 
-	// Cannot challenge a nonexistant listing
-	if (!reflect.DeepEqual(rm.GetListing(ctx, identifier), types.Listing{})) {
-		return sdk.NewError(2, 103, "Listing does not exist")
+	if ballot.Bond < minBond {
+		bm.DeleteBallot(ctx, identifier)
+		refund := sdk.Coin{
+			Denom: "RegistryCoin",
+			Amount: challengeBond,
+		}
+		_, _, err := accountKeeper.AddCoins(ctx, challenger, []sdk.Coin{refund})
+		if err != nil {
+			return err
+		}
+		return nil
 	}
-	
-	if listing.Status == "Challenged" {
-		return sdk.NewError(2, 104, "Listing already Challenged")
+	if ballot.Bond != challengeBond {
+		return sdk.NewError(2, 115, "Must match candidate's bond")
 	}
 
-	listing.Status = "Challenged"
+	ballot.Active = true
+	ballot.Challenger = challenger
+	ballot.EndCommitBlockStamp = ctx.BlockHeight() + commitLen
+	ballot.EndRevealBlockStamp = ballot.EndCommitBlockStamp + revealLen
 
-	key, _ := rm.Cdc.MarshalBinary(identifier)
-	newVal, _ := rm.Cdc.MarshalBinary(listing)
-	store.Set(key, newVal)
+	newBallot, _ := bm.Cdc.MarshalBinary(ballot)
+	key:= []byte(identifier)
+	store.Set(key, newBallot)
 
-	ballot := types.Ballot{
-		Identifier: identifier,
-		Owner: owner,
-		Challenger: challenger,
-		Approve: 0,
-		Deny: 0,
-		Bond: minBond,
-	}
-	ballotVal, _ := rm.Cdc.MarshalBinary(ballot)
-	voteStore.Set(key, ballotVal)
 	return nil
 }
 
-func (rm RegistryMapper) CommitListing(ctx sdk.Context, owner sdk.Address, identifier string, commitment []byte) sdk.Error {
-	commitStore := ctx.KVStore(rm.CommitKey)
+func (bm BallotMapper) VoteBallot(ctx sdk.Context, owner sdk.Address, identifier string, vote bool, power int64) sdk.Error {
+	ballotStore := ctx.KVStore(bm.BallotKey)
 
-	listing := rm.GetListing(ctx, identifier)
-	if (!reflect.DeepEqual(rm.GetListing(ctx, identifier), types.Listing{})) {
-		return sdk.NewError(2, 103, "Listing does not exist")
-	}
-
-	if listing.Status != "Challenged" {
-		return sdk.NewError(2, 105, "Listing is not challenged")
-	}
-
-	voter := types.Voter{
-		Owner: owner,
-		Identifier: identifier,
-	}
-	key, _ := rm.Cdc.MarshalBinary(voter)
-	commitStore.Set(key, commitment)
-	return nil
-}
-
-func (rm RegistryMapper) RevealListing(ctx sdk.Context, owner sdk.Address, identifier string, vote bool, nonce []byte, power int64) sdk.Error {
-	commitStore := ctx.KVStore(rm.CommitKey)
-	revealStore := ctx.KVStore(rm.RevealKey)
-	voteStore := ctx.KVStore(rm.VoteKey)
-
-	listing := rm.GetListing(ctx, identifier)
-	if (!reflect.DeepEqual(rm.GetListing(ctx, identifier), types.Listing{})) {
-		return sdk.NewError(2, 103, "Listing does not exist")
-	}
-
-	if listing.Status != "Challenged" {
-		return sdk.NewError(2, 105, "Listing is not challenged")
-	}
-	
-	voter := types.Voter{
-		Owner: owner,
-		Identifier: identifier,
-	}
-	key, _ := rm.Cdc.MarshalBinary(voter)
-
-	commitment := commitStore.Get(key)
-	
-	reveal := types.Vote{
-		Choice: vote,
-		Nonce: nonce,
-		Power: power,
-	}
-	val, _ := rm.Cdc.MarshalBinary(reveal)
-	if (!reflect.DeepEqual(crypto.Sha256(val), commitment)) {
-		return sdk.NewError(2, 106, "Vote does not match commitment")
-	}
-
-	revealStore.Set(key, val)
-
-	listingKey, _ := rm.Cdc.MarshalBinary(identifier)
-	bz := voteStore.Get(listingKey)
+	ballotKey := []byte(identifier)
+	bz := ballotStore.Get(ballotKey)
 	if bz == nil {
 		return sdk.NewError(2, 107, "Ballot does not exist")
 	}
 	ballot := &types.Ballot{}
-	err := rm.Cdc.UnmarshalBinary(bz, ballot)
+	err := bm.Cdc.UnmarshalBinary(bz, ballot)
 	if err != nil {
 		panic(err)
 	}
 	if vote {
-		ballot.Approve += 1
+		ballot.Approve += power
 	} else {
-		ballot.Deny += 1
+		ballot.Deny += power
 	}
-	newBallot, _ := rm.Cdc.MarshalBinary(*ballot)
-	voteStore.Set(listingKey, newBallot)
+	newBallot, _ := bm.Cdc.MarshalBinary(*ballot)
+	ballotStore.Set(ballotKey, newBallot)
+
 	return nil
+}
+
+func (bm BallotMapper) DeleteBallot(ctx sdk.Context, identifier string) {
+	key := []byte(identifier)
+	store := ctx.KVStore(bm.BallotKey)
+	store.Delete(key)
+}
+
+func (bm BallotMapper) AddListing(ctx sdk.Context, identifier string, votes int64) {
+	key := []byte(identifier)
+	store := ctx.KVStore(bm.ListingKey)
+
+	listing := types.Listing{
+		Identifier: identifier,
+		Votes: votes,
+	}
+	val, _ := bm.Cdc.MarshalBinary(listing)
+
+	store.Set(key, val)
+}
+
+func (bm BallotMapper) GetListing(ctx sdk.Context, identifier string) types.Listing {
+	key := []byte(identifier)
+	store := ctx.KVStore(bm.ListingKey)
+
+	bz := store.Get(key)
+	if bz == nil {
+		return types.Listing{}
+	}
+	listing := &types.Listing{}
+	err := bm.Cdc.UnmarshalBinary(bz, listing)
+	if err != nil {
+		panic(err)
+	}
+	
+	return *listing
+}
+
+func (bm BallotMapper) DeleteListing(ctx sdk.Context, identifier string) {
+	key := []byte(identifier)
+	store := ctx.KVStore(bm.ListingKey)
+
+	store.Delete(key)
 }

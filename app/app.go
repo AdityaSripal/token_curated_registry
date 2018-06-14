@@ -1,19 +1,19 @@
 package app
 
 import (
-	"encoding/json"
 	bam "github.com/cosmos/cosmos-sdk/baseapp"
+	cmn "github.com/tendermint/tmlibs/common"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	abci "github.com/tendermint/abci/types"
 	"github.com/tendermint/go-amino"
-	crypto "github.com/tendermint/go-crypto"
-	cmn "github.com/tendermint/tmlibs/common"
 	dbm "github.com/tendermint/tmlibs/db"
 	"github.com/tendermint/tmlibs/log"
 	"github.com/cosmos/cosmos-sdk/x/auth"
 	"github.com/cosmos/cosmos-sdk/x/bank"
 	handle "github.com/AdityaSripal/token_curated_registry/auth"
-	"github.com/AdityaSripal/token_curated_registry/db"
+	dbl "github.com/AdityaSripal/token_curated_registry/db"
+	"github.com/AdityaSripal/token_curated_registry/types"
+	"github.com/tendermint/go-crypto"
 	//rlp "github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -22,40 +22,42 @@ const (
 )
 
 // Extended ABCI application
-type ChildChain struct {
+type RegistryApp struct {
 	*bam.BaseApp
 
 	cdc *amino.Codec
 
-	minDeposit uint64
+	minDeposit int64
 
-	applyStage uint64
+	applyStage int64
 
-	commitStage uint64
+	commitStage int64
 
-	revealStage uint64
+	revealStage int64
 
-	dispensationPct float32
+	dispensationPct float64
 
-	quorum float32
+	quorum float64
 
 	// keys to access the substores
-	capKeyMainStore *sdk.KVStoreKey
+	capKeyMain *sdk.KVStoreKey
+	capKeyAccount *sdk.KVStoreKey
 	capKeyListings *sdk.KVStoreKey
 	capKeyCommits *sdk.KVStoreKey
 	capKeyReveals *sdk.KVStoreKey
-	capKeyVotes *sdk.KVStoreKey
+	capKeyBallots *sdk.KVStoreKey
+	capKeyFees *sdk.KVStoreKey
 
-	registryMapper db.RegistryMapper
+	ballotMapper dbl.BallotMapper
 
 	// Manage addition and subtraction of account balances
-	accountMapper sdk.AccountMapper
-	accountKeeper sdk.AccountKeeper
+	accountMapper auth.AccountMapper
+	accountKeeper bank.Keeper
 }
 
-func NewChildChain(logger log.Logger, db dmb.DB, mindeposit uint64, applystage uint64, commitstage uint64, revealstage uint64, dispensationpct float32, _quorum float32) *ChildChain {
+func NewRegistryApp(logger log.Logger, db dbm.DB, mindeposit int64, applystage int64, commitstage int64, revealstage int64, dispensationpct float64, _quorum float64) *RegistryApp {
 	cdc := MakeCodec()
-	var app = &ChildChain{
+	var app = &RegistryApp{
 		BaseApp: bam.NewBaseApp(appName, cdc, logger, db),
 		cdc: cdc,
 		minDeposit: mindeposit,
@@ -64,30 +66,42 @@ func NewChildChain(logger log.Logger, db dmb.DB, mindeposit uint64, applystage u
 		revealStage: revealstage,
 		dispensationPct: dispensationpct,
 		quorum: _quorum,
-		capKeyMainStore: sdk.NewKVStoreKey("main"),
-		capKeyAccount: sdk.NewKVStoreKey("acc")
+		capKeyMain: sdk.NewKVStoreKey("main"),
+		capKeyAccount: sdk.NewKVStoreKey("acc"),
+		capKeyFees: sdk.NewKVStoreKey("fee"),
 		capKeyListings: sdk.NewKVStoreKey("listings"),
 		capKeyCommits: sdk.NewKVStoreKey("commits"),
-		capKeyReveals: sdk.NewKVStoreKey("reveals")
-		capKeyVotes: sdk.NewKVStoreKey("votes"),
+		capKeyReveals: sdk.NewKVStoreKey("reveals"),
+		capKeyBallots: sdk.NewKVStoreKey("ballots"),
 	}
 
-	app.registryMapper = db.NewRegistryMapper(app.capKeyListings, app.capKeyCommits, app.capKeyReveals, app.capKeyVotes, app.cdc)
+	app.ballotMapper = dbl.NewBallotMapper(app.capKeyListings, app.capKeyBallots, app.capKeyCommits, app.capKeyReveals, app.cdc)
 	app.accountMapper = auth.NewAccountMapper(app.cdc, app.capKeyAccount, &auth.BaseAccount{})
 	app.accountKeeper =  bank.NewKeeper(app.accountMapper)
 
-	app.Router()
-		.addRoute("DeclareCandidacy", handle.NewCandidacyHandler(app.accountKeeper, app.accountMapper, app.registryMapper))
-		.addRoute("Challenge", handle.NewChallengeHandler(app.accountKeeper, app.accountMapper, app.registryMapper))
-		.addRoute("Commit", handle.NewCommitHandler(app.accountMapper, app.registryMapper))
-		.addRoute("Reveal", handle.NewRevealHandler(app.accountKeeper, app.accountMapper, app.registryMapper))
+	app.Router().
+		AddRoute("DeclareCandidacy", handle.NewCandidacyHandler(app.accountKeeper, app.ballotMapper, app.minDeposit, app.applyStage)).
+		AddRoute("Challenge", handle.NewChallengeHandler(app.accountKeeper, app.ballotMapper, app.commitStage, app.revealStage, app.minDeposit)).
+		AddRoute("Commit", handle.NewCommitHandler(app.cdc, app.capKeyBallots, app.capKeyCommits)).
+		AddRoute("Reveal", handle.NewRevealHandler(app.accountKeeper, app.ballotMapper)).
+		AddRoute("Apply", handle.NewApplyHandler(app.accountKeeper, app.ballotMapper, app.capKeyListings, app.quorum, app.dispensationPct)).
+		AddRoute("ClaimReward", handle.NewClaimRewardHandler(app.cdc, app.accountKeeper, app.capKeyBallots, app.capKeyReveals, app.capKeyListings, app.dispensationPct))
 
 	app.SetTxDecoder(app.txDecoder)
-	app.MountStoresIAVL(app.capKeyMainStore, app.capKeyAccount, app.capKeyListings, app.capKeyCommits, app.capKeyReveals, app.capKeyVotes)
-	app.SetAnteHandler(handle.NewAnteHandler(app.accountMapper, app.minDeposit))
+	app.SetInitChainer(app.initChainer)
+	app.MountStoresIAVL(app.capKeyMain, app.capKeyAccount, app.capKeyFees, app.capKeyListings, app.capKeyCommits, app.capKeyReveals, app.capKeyBallots)
+	app.SetAnteHandler(handle.NewAnteHandler(app.accountMapper))
+
+	err := app.LoadLatestVersion(app.capKeyMain)
+	if err != nil {
+		cmn.Exit(err.Error())
+	}
+
+
+	return app
 }
 
-func (app *ChildChain) initChainer(ctx sdk.Context, req abci.RequestInitChain) abci.ResponseInitChain {
+func (app *RegistryApp) initChainer(ctx sdk.Context, req abci.RequestInitChain) abci.ResponseInitChain {
 	stateJSON := req.AppStateBytes
 
 	genesisState := new(types.GenesisState)
@@ -98,7 +112,7 @@ func (app *ChildChain) initChainer(ctx sdk.Context, req abci.RequestInitChain) a
 	}
 
 	for _, gacc := range genesisState.Accounts {
-		acc, err := gacc.ToAppAccount()
+		acc, err := gacc.ToAccount()
 		if err != nil {
 			panic(err) // TODO https://github.com/cosmos/cosmos-sdk/issues/468
 			//	return sdk.ErrGenesisParse("").TraceCause(err, "")
@@ -108,9 +122,9 @@ func (app *ChildChain) initChainer(ctx sdk.Context, req abci.RequestInitChain) a
 	return abci.ResponseInitChain{}
 }
 
-func (app *ChildChain) txDecoder(txBytes []byte) (sdk.Tx, sdk.Error) {
-	var tx = sdk.StdTx
-	err := json.Unmarshal(txBytes, &tx)
+func (app *RegistryApp) txDecoder(txBytes []byte) (sdk.Tx, sdk.Error) {
+	var tx = auth.StdTx{}
+	err := app.cdc.UnmarshalBinary(txBytes, &tx)
 	if err != nil {
 		return nil, sdk.ErrTxDecode("")
 	}
@@ -121,5 +135,8 @@ func MakeCodec() *amino.Codec {
 	cdc := amino.NewCodec()
 	cdc.RegisterInterface((*sdk.Msg)(nil), nil)
 	types.RegisterAmino(cdc)
+	crypto.RegisterAmino(cdc)
+	cdc.RegisterInterface((*auth.Account)(nil), nil)
+	cdc.RegisterConcrete(&auth.BaseAccount{}, "cosmos-sdk/BaseAccount", nil)
 	return cdc
 }

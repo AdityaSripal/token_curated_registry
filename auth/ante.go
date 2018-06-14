@@ -1,27 +1,63 @@
 package auth
 
 import (
+	"bytes"
+	"fmt"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	"github.com/cosmos/cosmos-sdk/x/auth"
 	"reflect"
 )
 
-func NewAnteHandler(accountMapper sdk.AccountMapper, mindenom uint64) sdk.AnteHandler {
+func NewAnteHandler(accountMapper auth.AccountMapper) sdk.AnteHandler {
 	return func(ctx sdk.Context, tx sdk.Tx) (_ sdk.Context, _ sdk.Result, abort bool) {
-		sigs := tx.GetSignatures()
+		stdTx, ok := tx.(auth.StdTx)
+		if !ok {
+			return ctx, sdk.ErrInternal("tx must be StdTx").Result(), true
+		}
+
+		sigs := stdTx.GetSignatures()
 		if len(sigs) != 1 {
 			return ctx,
 				sdk.ErrUnauthorized("no signers").Result(),
 				true
 		}
 
+		sig := sigs[0]
 		msg := tx.GetMsg()
 
-		_, ok := tx.(sdk.StdTx)
-		if !ok {
-			return ctx, sdk.ErrInternal("tx must be in form of StdTx").Result(), true
-		}
-
 		signerAddr := msg.GetSigners()[0]
+
+		acc := accountMapper.GetAccount(ctx, signerAddr)
+
+		if acc == nil {
+			return ctx, sdk.ErrUnknownAddress(signerAddr.String()).Result(), true
+		}
+	
+		// Check and increment sequence number.
+		seq := acc.GetSequence()
+		if seq != sig.Sequence {
+			return ctx, sdk.ErrInvalidSequence(
+				fmt.Sprintf("Invalid sequence. Got %d, expected %d", sig.Sequence, seq)).Result(), true
+		}
+		acc.SetSequence(seq + 1)
+	
+		// If pubkey is not known for account,
+		// set it from the StdSignature.
+		pubKey := acc.GetPubKey()
+		if pubKey == nil {
+			pubKey = sig.PubKey
+			if pubKey == nil {
+				return ctx, sdk.ErrInvalidPubKey("PubKey not found").Result(), true
+			}
+			if !bytes.Equal(pubKey.Address(), signerAddr) {
+				return ctx, sdk.ErrInvalidPubKey(
+					fmt.Sprintf("PubKey does not match Signer address %v", signerAddr)).Result(), true
+			}
+			err := acc.SetPubKey(pubKey)
+			if err != nil {
+				return ctx, sdk.ErrInternal("setting PubKey on signer's account").Result(), true
+			}
+		}
 
 		if !reflect.DeepEqual(sigs[0].PubKey.Address().Bytes(), signerAddr.Bytes()) {
 			return ctx, sdk.ErrInternal("Wrong signer address").Result(), true
@@ -31,8 +67,8 @@ func NewAnteHandler(accountMapper sdk.AccountMapper, mindenom uint64) sdk.AnteHa
 			return ctx, sdk.ErrInternal("Invalid Signature").Result(), true
 		}
 
-		if uint64(accountMapper.GetAccount(ctx, signerAddr).GetCoins().AmountOf("RegistryCoin")) < mindenom {
-			return ctx, sdk.ErrInternal("Must bond at least minimum bond for candidacy").Result(), true
+		if !pubKey.VerifyBytes(msg.GetSignBytes(), sig.Signature) {
+			return ctx, sdk.ErrUnauthorized("signature verification failed").Result(), true
 		}
 
 		return ctx, sdk.Result{}, false
